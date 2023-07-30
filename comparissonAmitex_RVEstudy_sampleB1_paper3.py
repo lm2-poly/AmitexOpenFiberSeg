@@ -20,15 +20,9 @@ plt.rcParams["font.family"] = "Times New Roman"
 
 # finds all files in path that have been processed with Amitex
 
-#sample F1
-# dataPath="/media/facu/Svalbard_WD6TB/TomographicDataSvalbard/Juliette/sampleF1/sampleF1_combined/CombinedPreprocessed_Jun25/rotated_y__0.0_pivoted__-4.7/processed_x56-1436_y80-1422_z1-970/2022-06-27_13h16m01/"
-
-#sample B1 AND F1, were copied into that directory
-# dataPath="/media/facu/Svalbard_WD6TB/TomographicDataSvalbard/Juliette/sampleB1/Juxtaposed_sampleB1/rotated_y__0.0_pivoted_+4.5/processed_x1-2009_y1-1722_z1-971/2022-06-15_09h31m26/AmitexFiles/adjustedFraction/AmitexFiles_sampleB1_adjusted_July28th2022/RVE_results_thesis/"
-
 dataPaths=[
-    ("/media/facu/Svalbard_WD6TB/TomographicDataSvalbard/Juliette/sampleB1/Juxtaposed_sampleB1/rotated_y__0.0_pivoted_+4.5/processed_x1-2009_y1-1722_z1-971/2022-06-15_09h31m26/AmitexFiles_microStructure_June2023/downSampled/",r"sampleB1_periodic2x4_manual_([0-9]{2})_([0-9]{2})"),
-    ("/media/facu/Svalbard_WD6TB/TomographicDataSvalbard/Juliette/sampleF1/sampleF1_combined/CombinedPreprocessed_Jun25/rotated_y__0.0_pivoted__-4.7/processed_x56-1436_y80-1422_z1-970/2022-06-27_13h16m01/AmitexFiles_microStructure_June2023/downSampled/",r"sampleF1_manual_([0-9]{2})_([0-9]{2})")
+    ("sampleB1/processed_x1-2009_y1-1722_z1-971/2022-06-15_09h31m26/AmitexFiles_microStructure_June2023/downSampled/",r"sampleB1_periodic2x4_manual_([0-9]{2})_([0-9]{2})"),
+    ("sampleF1/processed_x56-1436_y80-1422_z1-970/2022-06-27_13h16m01/AmitexFiles_microStructure_June2023/downSampled/",r"sampleF1_manual_([0-9]{2})_([0-9]{2})")
 ]
 
 plot_error_bar=True

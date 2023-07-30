@@ -2,7 +2,6 @@
 
 from cfrph_interface import CraftInterface as CrI
 from cfrph_interface import AmitexInterface as AmI
-from cfrph_interface import MoriTanakaInterface as MT_I
 from cfrph_utils import getCommonPaths, secondsToText,hashDict
 import os
 import time
@@ -81,7 +80,6 @@ for material_tag in material_tagList:
     print('\nMain microstructure directory:\n\n {}\n'.format(microstructure_directory))
 
     run_amitex_bool     = True # Run Amitex on newly processed files
-    run_MoriTanaka_bool = False
     overwrite           = False
     makeVTK_stress_strain=True # Applies to Elasticity: makes detailled output of Amitex, not only averaged values 
 
@@ -308,113 +306,6 @@ for material_tag in material_tagList:
                         elif amitex_instance.loadingType =="relaxation":
                             print("(initial time step only, Abaqus convention)")
                             printVoigt4(modifyConvention(amitex_instance.C_hom[0]))
-
-
-            MT_log_file_name    = '{}log_mat_{}_res={}_origin_{}_sym={}_MT.txt'.format(
-                current_path,material_tag,resolution,origin,symmetry_fibres).replace("\'","")
-            process_now_bool = False
-            if run_MoriTanaka_bool:
-                # Check if this microstructure has been processed
-                if os.path.isfile(MT_log_file_name):
-                    print(MT_log_file_name,'found...\n')
-
-                    with open(MT_log_file_name, 'r') as f:
-                        lines=f.readlines()
-
-                    if "Attemping to process..." in lines[0]:
-                        #if processing has not been completed, attempt again
-                        process_now_bool=True               
-                    else:
-                        print('Already fully processed: {}\n'.format(current_path.split('/')[-1]))
-                else:
-                    if not os.path.exists(current_path):
-                        print("creating directory at: \n{}".format(current_path))
-                        os.mkdir(current_path)
-
-                    #first attempt
-                    with open(MT_log_file_name, 'w') as f:
-                        f.write('Attemping to process...\n')
-                        print('Attemping to process...\n')
-                        process_now_bool = True
-
-                if process_now_bool:
-
-                    if OpenFiberSeg:
-                        casename="{}_{}".format(current_path.split("/")[-3],current_path.split("/")[-2])
-                    else:
-                        casename="{}".format(current_path.split("/")[-2])
-
-                    MoriTanaka_instance = MT_I(
-                        current_path, 
-                        casename,
-                        dict_material_properties,
-                        material_tag,
-                        resolution,
-                        OpenFiberSeg=OpenFiberSeg,
-                        origin=origin,
-                        convergence_acceleration=convergence_acceleration,
-                        openMP_threads=openMP_threads)
-
-
-                    cpu_time_start=time.time()
-
-                    MoriTanaka_instance.preprocessing()
-                    MoriTanaka_instance.processing()
-
-                    with open(MT_log_file_name, 'r+') as f:
-
-                        E_l,E_t,nu_l,nu_t,G_l=MoriTanaka_instance.postprocessing()
-                        
-                        cpu_time_end=time.time()
-                        cpu_time_str=secondsToText(cpu_time_end-cpu_time_start)
-
-                        f.write('\nMoriTanaka executed casename: \t{}, \ton: {}, \t CPU time: {}, \t on host machine: {}'\
-                            .format(MoriTanaka_instance.get_generic_name(), time_stamp_string, cpu_time_str,gethostname()))
-                        
-                        f.write("\nCalculated homogeneous properties (with axis being z) :\n\nE_l\t\t={: >10.4f}\nE_t\t\t={: >10.4f}\nnu_l\t\t={: >10.4f}\nnu_t\t\t={: >10.4f}\nG_l\t\t={: >10.4f}\n".\
-                            format(E_l,E_t,nu_l,nu_t,G_l))
-
-                    print("Processed microstructure:")
-
-                    print(case_working_path)
-
-                    print("material_tag={}".format(material_tag))
-
-                    if dict_material_properties['fiber']['behavior']=="iso":
-                        print(
-                        "processing complete for this microstructure, with material properties= [E_m={: >8.4f} ,nu_m={: >8.4f}, E_f={: >8.4f}, nu_f={: >8.4f}] \n".\
-                            format(
-                                MoriTanaka_instance.get_E_m(), 
-                                MoriTanaka_instance.get_nu_m(),
-                                MoriTanaka_instance.get_E_f(),
-                                MoriTanaka_instance.get_nu_f()
-                            )
-                        )
-                    elif dict_material_properties['fiber']['behavior']=="trans_iso":
-                        print(
-                        "processing complete for this microstructure, with material properties= [E_m={: >8.4f} ,nu_m={: >8.4f}, E_t={: >8.4f}, E_l={: >8.4f},nu_t={: >8.4f}, nu_l={: >8.4f}, G_l={: >8.4f}] \n".\
-                        format(
-                            MoriTanaka_instance.get_E_m(), 
-                            MoriTanaka_instance.get_nu_m(), 
-                            MoriTanaka_instance.get_E_t(), 
-                            MoriTanaka_instance.get_E_l(), 
-                            MoriTanaka_instance.get_nu_t(),
-                            MoriTanaka_instance.get_nu_l(),
-                            MoriTanaka_instance.get_G_l()
-                            )
-                        )
-
-                    print("\nCalculated homogeneous properties (with axis being z) :\n\nE_l\t\t={: >10.4f}\nE_t\t\t={: >10.4f}\nnu_l\t\t={: >10.4f}\nnu_t\t\t={: >10.4f}\nG_l\t\t={: >10.4f}\n".\
-                                format(E_l,E_t,nu_l,nu_t,G_l))
-
-                    print("Calculated fiber volume fraction:\t{: >8.3%}".format(MoriTanaka_instance.fiberVolumeFraction))
-                    if OpenFiberSeg:
-                        "pores not implemented in legacy version of microstructures"
-                        print("Calculated pores volume fraction:\t{: >8.3%}".format(MoriTanaka_instance.poresVolumeFraction))
-
-
-                    print("Homogenized stiffness tensor:\n")
-                    printVoigt4(MoriTanaka_instance.C_hom)
 
 
 __author__     = "Facundo Sosa-Rey"

@@ -14,7 +14,6 @@ nIterMaxAmitex='8000' # for mesoscale homogenization
 
 if hostnameStr == "atlas.meca.polymtl.ca":
     mat_lib_path="/home/monet/fasos/Git_repos/Amitex_UMATs/libUmatAmitex.so"
-    pathMT_library='../MoriTanaka_distro/'
     max_vtk_size=1000
     openMP_threads=32
     showPlotsViscoelasticity=False

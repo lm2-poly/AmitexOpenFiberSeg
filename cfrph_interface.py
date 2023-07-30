@@ -24,17 +24,12 @@ from tensor_personal_functions import generate_trans_isoC_from_E_nu_G, isotropic
 from tifffile import TiffFile
 import pickle
 
-from materialProperties import pathMT_library,max_vtk_size,showPlotsViscoelasticity,nIterMaxAmitex
+from materialProperties import max_vtk_size,showPlotsViscoelasticity,nIterMaxAmitex
 
 import sys
 
 from matplotlib import pyplot as plt
 
-sys.path.insert(0, pathMT_library)
-
-print("path to Mori-Tanaka librairies: {}".format(pathMT_library))
-
-from MoriTanakaFunctions import parallelEval
 import hmgnzt_personal_functions as homF
 
 from cfrph_utils import import_hmgnzt_quad
@@ -49,7 +44,6 @@ _craft_foldername = '/craft_files'
 _amitex_foldername = '/amitex_files'
 _gmsh_foldername = '/gmsh_files'
 _abaqus_foldername = '/abaqus_files'
-_MoriTanaka_foldername="/MoriTanaka_files"
 
 
 class CFRPHInterface(ABC):
@@ -3325,270 +3319,12 @@ class AbaqusInterface(CFRPHInterface):
         self.node_sets[entity_type][set_name] = node_tags
 
 
-class MoriTanakaInterface(CFRPHInterface):
-    def __init__(
-        self,
-        rootpath,
-        microstructure_name,
-        material,
-        material_tag,
-        resolution,
-        OpenFiberSeg=False,
-        origin=None,
-        convergence_acceleration=True,
-        openMP_threads=1
-    ):
-        super().__init__(rootpath, microstructure_name, material,
-                         resolution, OpenFiberSeg=OpenFiberSeg, origin=origin)
 
-        # paramètre intégration fonction de Green
-        Pzeta   =32 #64 #combien de point de Gauss en z
-        Qomega  =32 #256#combien de points de Gauss en theta
 
-        self.zeta_csv  = import_hmgnzt_quad(pathMT_library, "zeta3_{}points.csv".format(Pzeta) )
-        self.omega_csv = import_hmgnzt_quad(pathMT_library, "omega_{}points.csv".format(Qomega) )
-
-        self.workspace_path   = '{}{}_mat_{}_res={}_origin={}_sym={}'.format(
-                rootpath,
-                _MoriTanaka_foldername,
-                material_tag,
-                resolution,
-                origin,
-                material["fiber"]["behavior"]).replace(" ","").replace("\'","").replace("//","/")
-
-        self.material_tag=material_tag
-        create_folder(self.workspace_path)
-
-        if self.material["fiber"]["behavior"]=="iso":
-            # no convention modification here
-            self.C=generate_isoC_from_E_nu(self.material["fiber"]["young"],self.material["fiber"]["poisson"])
-
-        elif self.material["fiber"]["behavior"]=="trans_iso":
-            # no convention modification here
-            self.C=generate_trans_isoC_from_E_nu_G(
-                        self.get_E_l(),
-                        self.get_E_t(),
-                        self.get_nu_l(),
-                        self.get_nu_t(),
-                        self.get_G_l(),
-                        self.get_axis()
-                        )
-        else: #self.material["fiber"]["behavior"]=="none"
-            print("not implemented")
-
-        self.C0=generate_isoC_from_E_nu(self.material['matrix']["young"],self.material['matrix']["poisson"])
-
-
-    def create_inclusions_fromTiffFiles(self):
-
-        if not self.OpenFiberSeg:
-            raise RuntimeError("Not implemented for microstructures not from OpenFiberSeg")
-
-        else:
-
-            V_fibers_cropped,V_pores_cropped,V_interface,fiberStruct=self.loadVolumes()
-
-            V_zones, LUT_markerToQuaternion, nZones,AR_LUT,print_e1E2 = compactifySubVolume(
-                V_fibers_cropped, fiberStruct, parallelHandle=True,returnAspectRatio=True)
-
-            self.totalVoxelCount=V_zones.shape[0]*V_zones.shape[1]*V_zones.shape[2]
-            
-            self.MoriTanakaData={}
-
-            self.fiberVoxelCount=0
-
-            for marker in LUT_markerToQuaternion:
-                voxelsCurrentMarker=len(np.where(V_zones==marker)[0])
-
-                self.fiberVoxelCount+=voxelsCurrentMarker
-
-                self.MoriTanakaData[marker]={
-                    "volumeFraction":voxelsCurrentMarker/self.totalVoxelCount ,
-                    "aspectRatio"   :AR_LUT[marker],
-                    "R"             :qt.as_rotation_matrix(LUT_markerToQuaternion[marker]),
-                    "material"      :"fiber"
-                }
-
-            print()
-
-
-    def createInclusionsFromTxtFile(self):
-    
-        partnerSet=set([])
-        
-        self.MoriTanakaData={}
-
-        self.fiberVolumeFraction=0.
-
-        for inclusionNumber,ellDict in self.ellipsoids.items():
-
-            if inclusionNumber not in partnerSet:
-
-                # the total volume is unitary in this description, 
-                # and each inclusion's volume is it's volume fraction
-                volumeFraction=4./3.*np.pi*ellDict["rx"]*ellDict["ry"]*ellDict["rz"]
-
-                self.fiberVolumeFraction+=volumeFraction
-
-                if ellDict["rx"]!=ellDict["ry"]:
-                    raise ValueError("not implemented for ellipsoids with non-circular cross-section")
-
-                if ellDict["mat"] =="fiber":
-                    ellDict["C"]=self.C
-                else: #voids
-                    ellDict["C"]=generate_isoC_from_E_nu(0, 0) #porosity
-
-
-                aspectRatio=ellDict["rz"]/ellDict["rx"]
-
-                rotationMatrix=qt.as_rotation_matrix(ellDict["quat"])
-
-                self.MoriTanakaData[inclusionNumber]={
-                    "volumeFraction":volumeFraction ,
-                    "aspectRatio"   :aspectRatio,
-                    "R"             :qt.as_rotation_matrix(ellDict["quat"]),
-                    "material"      :ellDict["mat"],
-                    "C"             :ellDict["C"],
-                }
-
-                partnerSet.update(ellDict["partners"])
-
-        print("\n\ttotal inclusions volume fraction: {: >8.4f}".format(self.fiberVolumeFraction))
-
-
-    def computeMT(self):
-
-        #to ensure dict value ordering doesn't cause issues, keep keys in a list (where order is enforced)
-        markerList=list(self.MoriTanakaData.keys())
-
-        # RStatic=np.array(
-        #     [[ 0., 0., 0.],
-        #      [ 0., 0., 0.],
-        #      [ 0., 0., 1.]])
-
-        results = Parallel(n_jobs=num_cores)\
-        (delayed(parallelEval)(
-            marker,
-            len(self.MoriTanakaData),
-            0,#iCases
-            1,#nCases
-            self.MoriTanakaData[marker]["aspectRatio"],
-            self.MoriTanakaData[marker]["R"],
-            # RStatic,
-            self.zeta_csv,
-            self.omega_csv,
-            self.C0,
-            self.MoriTanakaData[marker]["C"]
-            ) for marker in markerList)  
-        
-        T_r={}
-        C1_rotated={}
-
-        for index,marker in enumerate(markerList):
-            T_r[marker]         =results[index][0]
-            C1_rotated[marker]  =results[index][1]
-
-            # print('T_r')    
-            # tensF.printVoigt4(T_r[iFam])
-            # print("C1_rotated")
-            # tensF.printVoigt4(C1_rotated[iFam])
-
-
-        temp2=(1-self.fiberVolumeFraction)*np.identity(6)
-
-
-        for marker in markerList:
-            temp2+=self.MoriTanakaData[marker]["volumeFraction"]*T_r[marker]
-        
-
-        print("Construction tenseur homogénéisé\n")
-        C_tilde=self.C0#initialisation du calcul de Mori-Tanaka
-
-        A_rList=[]
-        for marker in markerList:
-            A_r=np.dot(T_r[marker],np.linalg.inv(temp2))
-            
-            A_rList.append(A_r)
-            #tensF.printVoigt4(A_r)
-            C_tilde=C_tilde+self.MoriTanakaData[marker]["volumeFraction"]*np.dot(C1_rotated[marker]-self.C0,A_r)
-
-
-        self.A_r_mean=np.zeros((6,6))
-        for i in range(6):
-            for j in range(6):
-                valuesList=[A[i,j] for A in A_rList]
-                self.A_r_mean[i,j]=np.mean(valuesList)
-
-        for line in C_tilde:
-            print("{: >8.3f}\t{: >8.3f}\t{: >8.3f}\t{: >8.3f}\t{: >8.3f}\t{: >8.3f}".format(*line))
-
-        # # # extraire coefficients isotrope transverse
-        self.C_hom,alphaMT,betaMT,gammaMT,gamma_pMT,\
-            deltaMT,delta_pMT,\
-            E_lMT,E_tMT,\
-            nu_lMT,nu_tMT,G_lMT = \
-                transverse_isotropic_projector(C_tilde,2)
-
-        print("E_lMT={: >8.3f}".format(E_lMT))
-        print("E_tMT={: >8.3f}".format(E_tMT))
-        print("nu_lMT={: >8.3f}".format(nu_lMT))
-        print("nu_lMT={: >8.3f}".format(nu_lMT))
-        print("G_lMT={: >8.3f}".format(G_lMT))
-
-        print("Projected C in transverse isotropic space")
-
-        for line in self.C_hom:
-            print("{: >8.3f}\t{: >8.3f}\t{: >8.3f}\t{: >8.3f}\t{: >8.3f}\t{: >8.3f}".format(*line))
-
-    def postprocessing(self):
-        gen_name = self.get_generic_name()
-        work_path = self.workspace_path
-
-        prec_total=8
-        prec_decimal=4
-        prec="{{: >{}.{}f}}, ".format(prec_total,prec_decimal)
-        precString="["+prec*6+"],\n"
-
-        filename='{}/{}_A2mean.txt'.format(work_path, gen_name)
-
-        with open(filename,'w') as f:
-            f.write("Resulting localization tensor A2\n\n")
-
-            f.write('\n Usual convention\n')
-            for i in range(6):
-                f.write(precString.format(*self.A_r_mean[i]))
-
-            f.write("\n\nIsotropic parameters: \n")
-            C_iso,alphaIso,betaIso,E,nu = isotropic_projector_Facu(self.A_r_mean)
-            outputString="\nalpha\t= \t"+prec+"\nbeta\t= \t"+prec+"\nE\t\t= \t"+prec+"\nnu\t\t= \t"+prec+"\n"
-            f.write(outputString.format(alphaIso,betaIso,E,nu))
-            
-        return write_to_file_Voigt4(
-            '{}/{}_C_hom.txt'.format(work_path, gen_name), 
-            self.C_hom,
-            material=self.material,
-            material_tag=self.material_tag,
-            modifyConventionBool=False
-            )
-
-    def preprocessing(self):
-        if self.OpenFiberSeg:
-            self.create_inclusions_fromTiffFiles()
-        else:
-            self.createInclusionsFromTxtFile()
-
-    def processing(self):
-        self.computeMT()
-
-    def set_rve_arrays():
-        pass
-
-
-
-__author__ = "Clément Vella"
+__author__ = "Facundo Sosa-Rey, Clément Vella"
 __copyright__ = "All rights reserved"
-__credits__ = ["Facundo Sosa-Rey, Christophe Geuzaine"]
-__license__ = "None"
+__credits__ = ["Christophe Geuzaine"]
+__license__ = "MIT"
 __version__ = "1.0.1"
 __maintainer__ = ""
 __email__ = ""
