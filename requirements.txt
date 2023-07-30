@@ -1,0 +1,11 @@
+quaternion==3.5.2.post4
+vtk==9.0.1
+intervals
+tifffile==2020.7.24
+numpy-quaternion
+numba
+python-intervals==1.10.0
+scikit-image==0.17.2
+opencv-python
+matplotlib==3.1.2
+mayavi
